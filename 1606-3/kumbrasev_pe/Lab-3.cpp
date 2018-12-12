@@ -4,7 +4,13 @@
 #include "opencv2/core/core.hpp"
 #include "opencv2/opencv.hpp"
 #include <vector>
+#include <fstream>
 #define root 0
+
+
+const char* kOptions =
+"{ i image           | test.png | image to process }"
+"{ s saveName        | <none>   | name to save     }";
 
 
 struct Region {
@@ -47,6 +53,8 @@ std::vector<Region> countRegions(int *src, int rows, int cols) {
 	return buf_r;
 }
 int main(int argv, char *argc[]) {
+
+	cv::CommandLineParser parser(argv, argc, kOptions);		
 	int* buf = nullptr;
 	int* sub = nullptr;
 	int src_size = 0;
@@ -58,7 +66,8 @@ int main(int argv, char *argc[]) {
 	double start, end;
 	int* displs = nullptr;
 	int* scounts = nullptr;
-	cv::Mat img = cv::imread("test4.png");
+	if (!parser.has("i")) throw "Load imgage";
+	cv::Mat img = cv::imread(parser.get<std::string>("i"), CV_LOAD_IMAGE_GRAYSCALE);
 	int width = img.cols, height = img.rows;
 	int* src = (int*)malloc(img.rows * img.cols * sizeof(int));
 	for (int i = 0; i < height; ++i)
@@ -105,25 +114,36 @@ int main(int argv, char *argc[]) {
 		std::vector<Region> regions = countRegions(local_vec, tempSize / ProcNum + 2, width);
 		free(local_vec);
 		local_vec = (int*)malloc(sizeof(int) * (tempSize / ProcNum) * width);
-
+		int* local_color = (int*)malloc(sizeof(int) * (tempSize / ProcNum) * width);
 		if (ProcRank) {
-			for (int i = 0; i < tempSize / ProcNum * width; ++i)
+			for (int i = 0; i < tempSize / ProcNum * width; ++i) {
 				local_vec[i] = regions[i + width].number;
+				local_color[i] = regions[i + width].color;
+			}
 		}
 		else {
-			for (int i = 0; i < tempSize / ProcNum * width; ++i)
+			for (int i = 0; i < tempSize / ProcNum * width; ++i) {
 				local_vec[i] = regions[i].number;
+				local_color[i] = regions[i].color;
+			}
 			free(buf);
 			buf = (int*)malloc(sizeof(int) * tempSize * width);
+			sub = (int*)malloc(sizeof(int) * tempSize * width);
 		}
 
 		MPI_Gather(local_vec, tempSize / ProcNum * width, MPI_INT, buf, tempSize / ProcNum * width, MPI_INT, root, MPI_COMM_WORLD);
+		MPI_Gather(local_color, tempSize / ProcNum * width, MPI_INT, sub, tempSize / ProcNum * width, MPI_INT, root, MPI_COMM_WORLD);
 		if (!ProcRank) {
-			/*int k = 0;
-			for (int i = 0; i < height; ++i, std::cout << std::endl)
-				for (int j = 0; j < width; ++j) {
-					std::cout << buf[k++] << " ";
-				}*/
+			int k = 0;
+			int z = 0;
+			std::vector<Region> regions = countRegions((sub), height, width);
+			std::ofstream infile("result.txt");
+			infile.is_open();
+
+			for (int i = 0; i < height; ++i, infile << std::endl)
+				for (int j = 0; j < width; ++j)
+					infile << regions[z++].number << " ";
+					infile.close();
 			end = MPI_Wtime();
 			std::cout << end - start << std::endl;
 		}
@@ -132,12 +152,15 @@ int main(int argv, char *argc[]) {
 	}
 	else {
 		start = MPI_Wtime();
+        countRegions(src, height, width);
 		std::vector<Region> regions = countRegions(src, height, width);
-		/*int k = 0;
-		for (int i = 0; i < height; ++i, std::cout << std::endl)
-			for (int j = 0; j < width; ++j) {
-				std::cout << regions[k++].number << " ";
-			}*/
+		int k = 0;
+		std::ofstream infile("result.txt");
+		infile.is_open();
+		for (int i = 0; i < height; ++i, infile << std::endl)
+			for (int j = 0; j < width; ++j)
+				infile << regions[k++].number << " ";
+		infile.close();
 		end = MPI_Wtime();
 		std::cout << std::endl << end - start << std::endl;
 	}
